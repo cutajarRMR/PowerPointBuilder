@@ -22,49 +22,61 @@ MODEL = "gpt-4o-mini"  # fast + cost-effective
 OUTPUT_FILE = "Generated_Presentation.pptx"
 # ----------------------------
 
-def generate_slide_outline(topic: str, n_slides: int) -> list[dict]:
-    """Use GPT to generate a slide outline with bullet points and speaker notes."""
-    from openai import OpenAI
-    import json
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+import json
 
-    client = OpenAI()
+def generate_slide_outline(topic: str, n_slides: int, instructions: str):
+    """Generate a slide outline using LangChain + OpenAI, incorporating user instructions."""
 
-    prompt = f"""
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=1,
+        model_kwargs={"response_format": {"type": "json_object"}} 
+    )
+
+    prompt_template = ChatPromptTemplate.from_template("""
     You are creating a professional internal PowerPoint presentation about "{topic}".
     Produce {n_slides} slides in **JSON** format.
 
-    Each slide should include:
+    The user has provided the following detailed instructions for what they want in the slides:
+    ---
+    {instructions}
+    ---
+    Ensure every slide aligns with these instructions.
+
+    Each slide must include:
     - "title": short slide title
     - "bullets": 3–5 concise bullet points
     - "notes": 2–3 sentence speaker notes explaining how to present the slide
 
-    Example format:
+    Output format example:
     [
       {{
         "title": "What is DataCamp?",
         "bullets": ["Online platform for data skills", "Python, R, SQL, Power BI", "Used by 10M+ learners"],
-        "notes": "Introduce DataCamp as a flexible platform for self-paced data learning..."
-      }},
-      ...
+        "notes": "Introduce DataCamp as a flexible platform..."
+      }}
     ]
-    Keep language clear, engaging, and professional.
-    """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.6
-    )
+    Respond ONLY with valid JSON.
+    """)
 
-    text = response.choices[0].message.content.strip()
+    chain = prompt_template | llm
+
+    result = chain.invoke({
+        "topic": topic,
+        "n_slides": n_slides,
+        "instructions": instructions
+    })
+
+    content = result.content
+
+    # Parse JSON output safely
     try:
-        slides = json.loads(text)
-    except json.JSONDecodeError:
-        text = text[text.find("["):text.rfind("]") + 1]
-        slides = json.loads(text)
-
-    return slides
-
+        return json.loads(content)
+    except Exception:
+        return content
 
 
 def build_presentation(slides: list[dict], template_path: str, output_path: str):
@@ -73,11 +85,14 @@ def build_presentation(slides: list[dict], template_path: str, output_path: str)
     from pptx.util import Pt
 
     prs = Presentation(template_path)
-    title_layout = 2
+    front_slide    = 0
+    title_layout   = 2
     content_layout = 3
 
     def get_text_shapes(slide):
         return [s for s in slide.shapes if s.has_text_frame]
+
+    prs.slides.add_slide(prs.slide_layouts[front_slide])
 
     # --- Cover slide ---
     cover = prs.slides.add_slide(prs.slide_layouts[title_layout])
@@ -123,14 +138,15 @@ def build_presentation(slides: list[dict], template_path: str, output_path: str)
 
 def main():
     parser = argparse.ArgumentParser(description="Generate PowerPoint slides with OpenAI.")
-    parser.add_argument("--topic", required=True, help="Presentation topic, e.g., 'DataCamp Overview'")
+    parser.add_argument("--topic",    required=True, help="Presentation topic, e.g., 'DataCamp Overview'")
+    parser.add_argument("--instructions",type=str,default="Make it professional and suitable for an internal company presentation.",help="Additional instructions for slide content")
     parser.add_argument("--slides", type=int, default=8, help="Number of slides to generate")
     parser.add_argument("--template", required=True, help="Path to company PowerPoint template")
     args = parser.parse_args()
 
-    slides = generate_slide_outline(args.topic, args.slides)
+    slides = generate_slide_outline(args.topic, args.slides, args.instructions)
     print(slides)
-    build_presentation(slides, args.template, OUTPUT_FILE)
+    build_presentation(slides['slides'], args.template, OUTPUT_FILE)
 
 
 if __name__ == "__main__":
