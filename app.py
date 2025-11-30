@@ -82,9 +82,11 @@ def generate_presentation():
         output_path = os.path.join(OUTPUT_FOLDER, output_filename)
         logger.info(f"Output will be saved to: {output_path}")
         
-        # Execute pp_agent.py
+        # Execute pp_agent.py using the virtual environment's Python
+        import sys
+        python_executable = sys.executable  # Use the same Python that's running Flask
         cmd = [
-            'python',
+            python_executable,
             'pp_agent.py',
             '--topic', topic,
             '--slides', str(slides),

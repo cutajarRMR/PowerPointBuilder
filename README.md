@@ -9,6 +9,8 @@ PowerPointBuilder is a Flask web application that intelligently generates PowerP
 ## Features
 
 - **AI-Powered Content Generation**: Uses GPT-4o-mini to generate slide content, titles, and speaker notes
+- **Web Research Integration**: Automatically researches topics using Tavily search to include current facts, statistics, and relevant information
+- **Intelligent Agent**: Uses LangChain agents to gather and synthesize information before generating slides
 - **Template-Aware**: Analyzes your PowerPoint template to understand available layouts and automatically selects the most appropriate layout for each slide
 - **Web Interface**: User-friendly Flask web application for easy interaction
 - **Custom Instructions**: Provide specific guidance on tone, audience, and content focus
@@ -34,10 +36,15 @@ cd PowerPointBuilder
 pip install -r requirements.txt
 ```
 
-3. Create a `.env` file in the project root and add your OpenAI API key:
+3. Create a `.env` file in the project root and add your API keys:
 ```
-OPENAI_API_KEY=your_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+TAVILY_API_KEY=your_tavily_api_key_here
 ```
+
+Get your API keys from:
+- OpenAI: https://platform.openai.com/api-keys
+- Tavily: https://tavily.com/ (for web search capabilities)
 
 ## Usage
 

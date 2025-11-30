@@ -10,11 +10,16 @@ Usage:
 import argparse
 import json
 from pathlib import Path
-from openai import OpenAI
 from pptx import Presentation
 from pptx.util import Pt
 import os
 import logging
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+import json
+from langchain_tavily import TavilySearch
+from langchain.agents import create_agent
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -34,9 +39,7 @@ MODEL = "gpt-4o-mini"  # fast + cost-effective
 OUTPUT_FILE = "Generated_Presentation.pptx"
 # ----------------------------
 
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-import json
+
 
 def analyze_slide_layouts(template_path: str) -> dict:
     """Analyze the template to understand available slide layouts and their structures."""
@@ -78,18 +81,33 @@ def analyze_slide_layouts(template_path: str) -> dict:
     }
 
 def generate_slide_outline(topic: str, n_slides: int, instructions: str, layouts_info: dict):
-    """Generate a slide outline using LangChain + OpenAI, incorporating available slide layouts."""
+    """Generate a slide outline using LangChain + OpenAI with web search tool."""
     logger.info(f"Generating slide outline for topic: {topic}")
     logger.info(f"Requested slides: {n_slides}")
     logger.info(f"Available layouts: {layouts_info['total_layouts']}")
     
+    # Initialize search tool
+    try:
+        search_tool = TavilySearch(max_results=5,topic="general")
+        logger.info("Tavily search tool initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Tavily search: {str(e)}, continuing without search")
+        search_tool = None
+
+    # Initialize LLM with tool binding
     try:
         llm = ChatOpenAI(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             temperature=1,
-            model_kwargs={"response_format": {"type": "json_object"}} 
+           # model_kwargs={"response_format": {"type": "json_object"}}
         )
-        logger.info("LLM initialized successfully")
+        
+        # Bind the search tool to the LLM if available
+        if search_tool:
+            agent = create_agent(llm, [search_tool])
+            logger.info("LLM initialized with search tool binding")
+        else:
+            logger.error("Failed to initialize LLM: No Seatch tool available")
     except Exception as e:
         logger.error(f"Failed to initialize LLM: {str(e)}")
         raise
@@ -99,10 +117,13 @@ def generate_slide_outline(topic: str, n_slides: int, instructions: str, layouts
         f"- Layout {l['index']}: '{l['name']}' with placeholders: {', '.join([p['name'] for p in l['placeholders']])}"
         for l in layouts_info['layouts']
     ])
-
+    
     prompt_template = ChatPromptTemplate.from_template("""
     You are creating a professional internal PowerPoint presentation about "{topic}".
-    Produce {n_slides} slides in **JSON** format.
+    
+    IMPORTANT: If you need current information, statistics, or facts about this topic, use the tavily_search_results_json tool to search the web first. This will help make the presentation accurate and current.
+    
+    After gathering information (if needed), produce {n_slides} slides in **JSON** format.
 
     The PowerPoint template has the following slide layouts available:
     {layouts_description}
@@ -111,7 +132,8 @@ def generate_slide_outline(topic: str, n_slides: int, instructions: str, layouts
     ---
     {instructions}
     ---
-    Ensure every slide aligns with these instructions.
+    
+    Ensure every slide aligns with these instructions and uses accurate, current information.
 
     For each slide, you must:
     1. Select the most appropriate layout_index based on the content type
@@ -147,9 +169,9 @@ def generate_slide_outline(topic: str, n_slides: int, instructions: str, layouts
     Respond ONLY with valid JSON wrapped in a "slides" array.
     """)
 
-    chain = prompt_template | llm
+    chain = prompt_template | agent
 
-    logger.info("Invoking LLM to generate slide content...")
+    logger.info("Invoking LLM to generate slide content (with web search capability)...")
     try:
         result = chain.invoke({
             "topic": topic,
@@ -162,12 +184,13 @@ def generate_slide_outline(topic: str, n_slides: int, instructions: str, layouts
         logger.error(f"LLM invocation failed: {str(e)}")
         raise
 
-    content = result.content
+    #content = result.content
+    content = result['messages'][-1].content # Get the last message content
     logger.debug(f"Raw LLM response length: {len(content)} characters")
 
     # Parse JSON output safely
     try:
-        parsed_data = json.loads(content)
+        parsed_data = json.loads(content.replace('```json','').replace('```',''))
         logger.info(f"Successfully parsed JSON with {len(parsed_data.get('slides', []))} slides")
         return parsed_data
     except Exception as e:
